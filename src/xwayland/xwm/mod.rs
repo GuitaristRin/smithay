@@ -1059,6 +1059,21 @@ impl X11Wm {
                 }
             }
             calloop::channel::Event::Closed => {
+                // The X11 connection is gone, so no pending selection transfer can make
+                // progress. Remove their event sources while this `X11Wm` is still reachable:
+                // once `disconnected` returns the compositor may drop it, and a transfer fd
+                // dispatched afterwards would call `xwm_state` for an id with no backing wm.
+                if let Some(event_handle) = event_handle.upgrade() {
+                    let xwm = data.xwm_state(id);
+                    for selection in [&mut xwm.clipboard, &mut xwm.primary] {
+                        for (_, transfer) in selection.incoming.drain() {
+                            transfer.destroy(&event_handle);
+                        }
+                        for (_, transfer) in selection.outgoing.drain() {
+                            transfer.destroy(&event_handle);
+                        }
+                    }
+                }
                 data.disconnected(id);
             }
         })?;
